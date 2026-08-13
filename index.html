@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>呼吸爱心 · 精巧粒子</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: #0b0b0b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas {
+            display: block;
+            background: transparent;
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="heartCanvas"></canvas>
+    <script>
+        (function() {
+            const canvas = document.getElementById('heartCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // ----- 设备像素比 & 尺寸 -----
+            let DPR = Math.min(window.devicePixelRatio || 1, 2.5); // 限制最大2.5，平衡性能
+            let CANVAS_SIZE = 0;
+            let CX = 0, CY = 0;
+
+            function resizeCanvas() {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                // 逻辑尺寸：取宽高较小值的92%，保证完整显示
+                const logicalSize = Math.min(w, h) * 0.92;
+                // 物理像素尺寸 = 逻辑尺寸 * DPR (但canvas宽高用物理像素，CSS用逻辑像素)
+                const physicalSize = logicalSize * DPR;
+                canvas.width = physicalSize;
+                canvas.height = physicalSize;
+                canvas.style.width = logicalSize + 'px';
+                canvas.style.height = logicalSize + 'px';
+                // 存储逻辑尺寸以便计算坐标
+                CANVAS_SIZE = logicalSize;
+                CX = CANVAS_SIZE / 2;
+                CY = CANVAS_SIZE / 2;
+                return CANVAS_SIZE;
+            }
+
+            // 首次初始化
+            resizeCanvas();
+            // 窗口变化重置 (防抖)
+            let resizeTimer = null;
+            window.addEventListener('resize', () => {
+                if (resizeTimer) clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+                    resizeCanvas();
+                    // 重新生成心形 (因为坐标基于新尺寸)
+                    heart = new Heart();
+                    frameCounter = 0;
+                    resizeTimer = null;
+                }, 150);
+            });
+
+            // ----- 颜色配置 -----
+            const HEART_COLOR = '#FF69B4';
+            const HEART_COLOR_LIGHT = '#FFB6C1';
+            const GENERATE_FRAME = 60;
+
+            // ----- 心形函数 (经典参数方程) -----
+            function heartFunction(t) {
+                const scale = (CANVAS_SIZE / 780) * 14;
+                const x = 16 * Math.pow(Math.sin(t), 3);
+                const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+                return {
+                    x: Math.round(x * scale + CX),
+                    y: Math.round(y * scale + CY)
+                };
+            }
+
+            // ----- 随机散射 (内部扩散) -----
+            function scatterInside(x, y, beta = 0.15) {
+                const ratioX = -beta * Math.log(Math.random());
+                const ratioY = -beta * Math.log(Math.random());
+                const dx = ratioX * (x - CX);
+                const dy = ratioY * (y - CY);
+                return { x: Math.round(x - dx), y: Math.round(y - dy) };
+            }
+
+            // ----- 呼吸曲线 -----
+            function curve(p) {
+                return Math.sin(p * 0.25) * 0.5 + 0.5;
+            }
+
+            // ----- 位置扰动 (呼吸核心) -----
+            function calcPosition(x, y, ratio) {
+                const dx = x - CX;
+                const dy = y - CY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const force = 1 / Math.pow(dist + 0.1, 0.5);
+                const nx = ratio * force * dx * 0.5 + (Math.random() - 0.5) * 1.5;
+                const ny = ratio * force * dy * 0.5 + (Math.random() - 0.5) * 1.5;
+                return { x: Math.round(x - nx), y: Math.round(y - ny) };
+            }
+
+            // ----- 核心类：心形粒子系统 (精巧粒子版) -----
+            class Heart {
+                constructor() {
+                    this._points = [];
+                    this._edgeDiffusionPoints = [];
+                    this._centerDiffusionPoints = [];
+                    this.generateFrame = GENERATE_FRAME;
+                    this.build(4000);
+                }
+
+                build(number) {
+                    const pointSet = new Set();
+                    let attempts = 0;
+                    while (this._points.length < number && attempts < number * 3) {
+                        const t = Math.random() * 2 * Math.PI;
+                        const p = heartFunction(t);
+                        const key = p.x + ',' + p.y;
+                        if (!pointSet.has(key)) {
+                            pointSet.add(key);
+                            this._points.push(p);
+                        }
+                        attempts++;
+                    }
+
+                    // 边缘扩散点
+                    for (const p of this._points) {
+                        for (let j = 0; j < 3; j++) {
+                            const sp = scatterInside(p.x, p.y, 0.05);
+                            this._edgeDiffusionPoints.push(sp);
+                        }
+                    }
+
+                    // 中心扩散点
+                    const pointList = [...this._points];
+                    for (let i = 0; i < 6000; i++) {
+                        const idx = Math.floor(Math.random() * pointList.length);
+                        const chosen = pointList[idx];
+                        const sp = scatterInside(chosen.x, chosen.y, 0.17);
+                        this._centerDiffusionPoints.push(sp);
+                    }
+                }
+
+                // 计算当前帧所有粒子 (包含动态大小)
+                calc(frame) {
+                    const frameRatio = frame / 12 * Math.PI;
+                    const ratio = 8 * curve(frameRatio);
+
+                    const allPoints = [];
+
+                    // 根据 DPR 动态调整粒子基础大小，使其在手机上更精巧
+                    // 基础尺寸范围：0.5 ~ 1.8 (逻辑像素)，再除以 DPR 得到物理像素
+                    // 但为了视觉统一，我们使用逻辑尺寸，然后通过 canvas 物理像素自动适配
+                    // 所以粒子大小直接用逻辑像素，但数值要小，因为 DPR 放大了物理像素
+                    // 我们直接使用 0.3~1.2 逻辑像素，再乘以 DPR 的倒数？ 不对，canvas 绘制时坐标是逻辑像素，但实际渲染会乘以 DPR
+                    // 所以为了在手机上看起来小，我们应该使用更小的逻辑像素值，让 DPR 放大后依然精巧
+                    // 经过测试，逻辑像素 0.4~1.2 在手机上表现细腻
+                    const baseMin = 0.35;
+                    const baseMax = 1.1;
+
+                    // 主轮廓点 (数量多，稍微小一点)
+                    for (const p of this._points) {
+                        const np = calcPosition(p.x, p.y, ratio);
+                        const size = baseMin + Math.random() * (baseMax - baseMin);
+                        allPoints.push({ x: np.x, y: np.y, size: size });
+                    }
+
+                    // 边缘扩散点 (稍小)
+                    for (const p of this._edgeDiffusionPoints) {
+                        const np = calcPosition(p.x, p.y, ratio);
+                        const size = baseMin * 0.8 + Math.random() * (baseMax * 0.7 - baseMin * 0.8);
+                        allPoints.push({ x: np.x, y: np.y, size: size });
+                    }
+
+                    // 中心扩散点 (稍大一点，增加层次)
+                    for (const p of this._centerDiffusionPoints) {
+                        const np = calcPosition(p.x, p.y, ratio);
+                        const size = baseMin * 1.1 + Math.random() * (baseMax * 1.1 - baseMin * 1.1);
+                        allPoints.push({ x: np.x, y: np.y, size: size });
+                    }
+
+                    return allPoints;
+                }
+
+                render(ctx, frame) {
+                    const points = this.calc(frame % this.generateFrame);
+
+                    // 清空 (透明背景)
+                    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+                    // ---- 绘制粒子 (圆形，抗锯齿) ----
+                    // 使用圆形绘制，边缘柔和
+                    for (const p of points) {
+                        const color = Math.random() > 0.6 ? HEART_COLOR_LIGHT : HEART_COLOR;
+                        ctx.beginPath();
+                        // 粒子大小至少为0.3逻辑像素，避免太小消失
+                        const radius = Math.max(0.3, p.size * 0.5);
+                        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                        ctx.fillStyle = color;
+                        // 轻微透明度叠加，增加层次感
+                        ctx.globalAlpha = 0.85 + Math.random() * 0.15;
+                        ctx.fill();
+                    }
+                    // 重置透明度
+                    ctx.globalAlpha = 1.0;
+
+                    // ---- 文字装饰 (保持精致) ----
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    const fontSize = Math.min(CANVAS_SIZE / 16, 40);
+                    ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", Arial, sans-serif`;
+                    ctx.fillStyle = '#FF69B4';
+                    ctx.shadowColor = 'rgba(255,105,180,0.25)';
+                    ctx.shadowBlur = 18;
+                    ctx.fillText('💗 同款 💗', CX, CY - CANVAS_SIZE * 0.35);
+
+                    const subFontSize = Math.min(CANVAS_SIZE / 28, 22);
+                    ctx.font = `italic ${subFontSize}px Arial, sans-serif`;
+                    ctx.fillStyle = '#FFB6C1';
+                    ctx.shadowBlur = 10;
+                    ctx.fillText('✨ You are my heartbeat ✨', CX, CY - CANVAS_SIZE * 0.27);
+
+                    // 重置阴影
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            // ----- 实例化心形 -----
+            let heart = new Heart();
+            let frameCounter = 0;
+            let lastTimestamp = 0;
+
+            // ----- 动画循环 (限制帧率 30fps 左右，节省性能) -----
+            function animate(timestamp) {
+                // 控制帧率，大约 30fps (33ms)
+                if (timestamp - lastTimestamp < 33) {
+                    requestAnimationFrame(animate);
+                    return;
+                }
+                lastTimestamp = timestamp;
+
+                heart.render(ctx, frameCounter);
+                frameCounter = (frameCounter + 1) % GENERATE_FRAME;
+
+                requestAnimationFrame(animate);
+            }
+
+            // 启动动画
+            requestAnimationFrame(animate);
+
+            // ----- 键盘快捷键 (保留) -----
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'r' || e.key === 'R') {
+                    frameCounter = 0;
+                }
+                if (e.key === 'f' || e.key === 'F') {
+                    if (!document.fullscreenElement) {
+                        document.documentElement.requestFullscreen().catch(() => {});
+                    } else {
+                        document.exitFullscreen().catch(() => {});
+                    }
+                }
+            });
+
+            // 点击/触摸重置呼吸相位 (提升交互)
+            canvas.addEventListener('click', () => {
+                frameCounter = 0;
+            });
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                frameCounter = 0;
+            }, { passive: false });
+
+            console.log('✨ 呼吸爱心 · 精巧粒子版已启动 (DPR=' + DPR + ')');
+        })();
+    </script>
+</body>
+</html>
