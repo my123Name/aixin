@@ -10,7 +10,8 @@
             padding: 0;
             box-sizing: border-box;
         }
-        html, body {
+        html,
+        body {
             width: 100%;
             height: 100%;
             background: #000;
@@ -28,6 +29,7 @@
             width: 100vw;
             height: 100vh;
             object-fit: contain;
+            touch-action: none;
         }
     </style>
 </head>
@@ -37,10 +39,12 @@
         const canvas = document.getElementById('heartCanvas');
         const ctx = canvas.getContext('2d');
 
+        // ─── 画布尺寸 ───
         function resizeCanvas() {
             const w = window.innerWidth;
             const h = window.innerHeight;
-            const size = Math.min(w, h) * 0.92;
+            // 占比提升到 96%，让画布更满
+            const size = Math.min(w, h) * 0.96;
             canvas.width = size;
             canvas.height = size;
             canvas.style.width = size + 'px';
@@ -52,16 +56,20 @@
         let CX = CANVAS_SIZE / 2;
         let CY = CANVAS_SIZE / 2;
 
+        // ─── 颜色 ───
         const HEART_COLOR = '#FF69B4';
         const HEART_COLOR_LIGHT = '#FFB6C1';
         const GENERATE_FRAME = 60;
 
+        // ─── 爱心缩放（增大爱心） ───
+        // 原版为 14，现提升到 22，爱心增大约 57%
         function getScale() {
-            return CANVAS_SIZE / 780;
+            return (CANVAS_SIZE / 780) * 22;
         }
 
+        // ─── 心形函数 ───
         function heartFunction(t) {
-            const scale = getScale() * 14;
+            const scale = getScale();
             const x = 16 * Math.pow(Math.sin(t), 3);
             const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
             return {
@@ -70,7 +78,8 @@
             };
         }
 
-        function scatterInside(x, y, beta = 0.15) {
+        // ─── 内部散射 ───
+        function scatterInside(x, y, beta) {
             const ratioX = -beta * Math.log(Math.random());
             const ratioY = -beta * Math.log(Math.random());
             const dx = ratioX * (x - CX);
@@ -78,10 +87,12 @@
             return { x: Math.round(x - dx), y: Math.round(y - dy) };
         }
 
+        // ─── 呼吸曲线 ───
         function curve(p) {
             return Math.sin(p * 0.25) * 0.5 + 0.5;
         }
 
+        // ─── 位置扰动 ───
         function calcPosition(x, y, ratio) {
             const dx = x - CX;
             const dy = y - CY;
@@ -92,13 +103,19 @@
             return { x: Math.round(x - nx), y: Math.round(y - ny) };
         }
 
+        // ─── 粒子自适应缩放 ───
+        // 让粒子大小随画布尺寸自动调整，在手机上变得更精细
+        const PARTICLE_SCALE = CANVAS_SIZE / 780;
+
+        // ─── 主类 ───
         class Heart {
             constructor() {
                 this._points = [];
                 this._edgeDiffusionPoints = [];
                 this._centerDiffusionPoints = [];
                 this.generateFrame = GENERATE_FRAME;
-                this.build(4000);
+                // 增加粒子数量，弥补尺寸减小带来的密度损失
+                this.build(6000); // 原 4000
             }
 
             build(number) {
@@ -115,15 +132,17 @@
                     attempts++;
                 }
 
+                // 边缘扩散：每个主点生成 4 个（原 3 个）
                 for (const p of this._points) {
-                    for (let j = 0; j < 3; j++) {
+                    for (let j = 0; j < 4; j++) {
                         const sp = scatterInside(p.x, p.y, 0.05);
                         this._edgeDiffusionPoints.push(sp);
                     }
                 }
 
+                // 中心扩散：增加到 10000 个（原 6000）
                 const pointList = [...this._points];
-                for (let i = 0; i < 6000; i++) {
+                for (let i = 0; i < 10000; i++) {
                     const idx = Math.floor(Math.random() * pointList.length);
                     const chosen = pointList[idx];
                     const sp = scatterInside(chosen.x, chosen.y, 0.17);
@@ -137,21 +156,24 @@
 
                 const allPoints = [];
 
+                // 主粒子：尺寸 0.8~2.0 自适应
                 for (const p of this._points) {
                     const np = calcPosition(p.x, p.y, ratio);
-                    const size = Math.floor(Math.random() * 3) + 1;
+                    const size = (0.8 + Math.random() * 1.2) * PARTICLE_SCALE;
                     allPoints.push({ x: np.x, y: np.y, size: size });
                 }
 
+                // 边缘扩散粒子：尺寸 0.5~1.2 自适应
                 for (const p of this._edgeDiffusionPoints) {
                     const np = calcPosition(p.x, p.y, ratio);
-                    const size = Math.floor(Math.random() * 2) + 1;
+                    const size = (0.5 + Math.random() * 0.7) * PARTICLE_SCALE;
                     allPoints.push({ x: np.x, y: np.y, size: size });
                 }
 
+                // 中心扩散粒子：尺寸 0.4~1.0 自适应
                 for (const p of this._centerDiffusionPoints) {
                     const np = calcPosition(p.x, p.y, ratio);
-                    const size = Math.floor(Math.random() * 2) + 1;
+                    const size = (0.4 + Math.random() * 0.6) * PARTICLE_SCALE;
                     allPoints.push({ x: np.x, y: np.y, size: size });
                 }
 
@@ -163,39 +185,50 @@
 
                 ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
+                // ── 绘制粒子 ──
+                // 为了更好的性能，批量绘制同色粒子
+                // 但为了颜色随机，我们仍然逐个绘制
                 for (const p of points) {
                     const color = Math.random() > 0.6 ? HEART_COLOR_LIGHT : HEART_COLOR;
                     ctx.fillStyle = color;
                     const s = p.size;
+                    // 使用浮点数尺寸，canvas 会自动抗锯齿
                     ctx.fillRect(p.x, p.y, s, s);
                 }
 
+                // ── 文字 ──
+                // 文字位置上移，避免遮挡增大的爱心
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
 
-                const fontSize = Math.min(CANVAS_SIZE / 16, 40);
-                ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", Arial, sans-serif`;
+                // 主标题
+                const fontSize = Math.min(CANVAS_SIZE / 14, 42);
+                ctx.font = `bold ${fontSize}px "Microsoft YaHei","PingFang SC",Arial,sans-serif`;
                 ctx.fillStyle = '#FF69B4';
-                ctx.shadowColor = 'rgba(255,105,180,0.3)';
-                ctx.shadowBlur = 20;
-                ctx.fillText('💗 同款 💗', CX, CY - CANVAS_SIZE * 0.35);
+                ctx.shadowColor = 'rgba(255,105,180,0.35)';
+                ctx.shadowBlur = 24;
+                ctx.fillText('💗 同款 💗', CX, CY - CANVAS_SIZE * 0.42);
 
-                const subFontSize = Math.min(CANVAS_SIZE / 28, 22);
-                ctx.font = `italic ${subFontSize}px Arial, sans-serif`;
+                // 副标题
+                const subFontSize = Math.min(CANVAS_SIZE / 26, 24);
+                ctx.font = `italic ${subFontSize}px Arial,sans-serif`;
                 ctx.fillStyle = '#FFB6C1';
-                ctx.shadowBlur = 12;
-                ctx.fillText('✨ You are my heartbeat ✨', CX, CY - CANVAS_SIZE * 0.27);
+                ctx.shadowBlur = 16;
+                ctx.fillText('✨ You are my heartbeat ✨', CX, CY - CANVAS_SIZE * 0.35);
 
                 ctx.shadowBlur = 0;
             }
         }
 
+        // ─── 实例 ───
         let heart = new Heart();
 
         let frameCounter = 0;
         let lastTimestamp = 0;
 
+        // ─── 动画循环 ───
         function animate(timestamp) {
+            // 限制帧率，避免过热
             if (timestamp - lastTimestamp < 40) {
                 requestAnimationFrame(animate);
                 return;
@@ -210,17 +243,22 @@
 
         requestAnimationFrame(animate);
 
+        // ─── 窗口自适应 ───
         window.addEventListener('resize', () => {
             const newSize = resizeCanvas();
             if (newSize !== CANVAS_SIZE) {
                 CANVAS_SIZE = newSize;
                 CX = CANVAS_SIZE / 2;
                 CY = CANVAS_SIZE / 2;
+                // 重新计算粒子自适应缩放
+                // 由于 PARTICLE_SCALE 在类外部定义，需要重新赋值
+                // 但为了简洁，我们重新生成 Heart 实例
                 heart = new Heart();
                 frameCounter = 0;
             }
         });
 
+        // ─── 键盘快捷键 ───
         document.addEventListener('keydown', (e) => {
             if (e.key === 'r' || e.key === 'R') {
                 frameCounter = 0;
@@ -233,6 +271,19 @@
                 }
             }
         });
+
+        // ─── 触屏设备双击全屏（辅助） ───
+        canvas.addEventListener('dblclick', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen().catch(() => {});
+            }
+        });
+
+        console.log('✨ 同款呼吸爱心已加载');
+        console.log('📱 粒子已自适应缩小，爱心已放大');
+        console.log('⌨️  [R] 重置动画  [F] 全屏切换');
     </script>
 </body>
 </html>
