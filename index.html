@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>爱心</title>
+    <title>爱心 · 自适应放大</title>
     <style>
         * {
             margin: 0;
@@ -24,7 +24,6 @@
         }
         canvas {
             display: block;
-            /* 关键：canvas 样式宽高 = 视口宽高，保证填满且居中 */
             width: 100vw;
             height: 100vh;
             object-fit: contain;
@@ -39,13 +38,14 @@
             const canvas = document.getElementById('heartCanvas');
             const ctx = canvas.getContext('2d');
 
-            // ----- 设备像素比 -----
+            // ----- 设备像素比 (限制最大2.5以平衡性能) -----
             const DPR = Math.min(window.devicePixelRatio || 1, 2.5);
 
-            // ----- 尺寸管理：使用视口宽高，canvas物理像素 = 视口像素 * DPR -----
+            // ----- 尺寸变量 -----
             let W = 0, H = 0;          // 逻辑尺寸 (CSS像素)
             let CW = 0, CH = 0;        // 物理尺寸 (canvas 实际像素)
             let CX = 0, CY = 0;        // 中心坐标 (逻辑像素)
+            let HEART_SCALE = 1;       // 心形缩放因子
 
             function resizeCanvas() {
                 // 获取视口宽高 (逻辑像素)
@@ -58,18 +58,31 @@
                 canvas.width = CW;
                 canvas.height = CH;
 
-                // Canvas CSS 尺寸 = 视口尺寸 (100vw, 100vh)
+                // Canvas CSS 尺寸 = 视口尺寸
                 canvas.style.width = W + 'px';
                 canvas.style.height = H + 'px';
 
-                // 中心坐标基于逻辑像素
+                // 中心坐标 (逻辑像素)
                 CX = W / 2;
                 CY = H / 2;
 
-                // 缩放因子：以宽度为基准，因为心形是正方形区域，取宽高较小值
-                const baseSize = Math.min(W, H);
-                // 心形基础缩放：使得心形占屏幕 92% 左右 (与之前逻辑一致)
-                window.HEART_SCALE = (baseSize / 780) * 14;
+                // ===== 核心：自适应缩放 =====
+                // 心形原始大小范围：x ∈ [-16, 16], y ∈ [-17, 16] 左右
+                // 我们希望心形占屏幕宽高的 92%，同时保持比例
+                const targetRatio = 0.92; // 占屏幕比例
+                // 心形在参数方程中的最大跨度约为 32 (x) 和 33 (y)
+                const heartWidth = 32;
+                const heartHeight = 33;
+                
+                // 根据屏幕宽高计算缩放，使得心形刚好占满目标比例
+                const scaleX = (W * targetRatio) / heartWidth;
+                const scaleY = (H * targetRatio) / heartHeight;
+                // 取较小值保证心形完整显示，同时乘以系数让心形更大（因为之前用14，现在直接计算）
+                // 但14是经验值，我们直接使用计算出的缩放，并微调让心形更饱满
+                const baseScale = Math.min(scaleX, scaleY);
+                // 额外放大系数：因为心形不是完全填满边界，适当放大10%
+                HEART_SCALE = baseScale * 1.15;
+                
                 // 存储逻辑尺寸供其他计算
                 window.LOGIC_W = W;
                 window.LOGIC_H = H;
@@ -97,7 +110,7 @@
 
             // ----- 心形函数 (使用逻辑坐标) -----
             function heartFunction(t) {
-                const scale = window.HEART_SCALE || 14;
+                const scale = HEART_SCALE;
                 const x = 16 * Math.pow(Math.sin(t), 3);
                 const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
                 return {
@@ -131,7 +144,7 @@
                 return { x: Math.round(x - nx), y: Math.round(y - ny) };
             }
 
-            // ----- 核心类：心形粒子系统 (精巧粒子版) -----
+            // ----- 核心类：心形粒子系统 (自适应放大版) -----
             class Heart {
                 constructor() {
                     this._points = [];
@@ -173,16 +186,19 @@
                     }
                 }
 
-                // 计算当前帧所有粒子 (包含动态大小)
+                // 计算当前帧所有粒子
                 calc(frame) {
                     const frameRatio = frame / 12 * Math.PI;
                     const ratio = 8 * curve(frameRatio);
 
                     const allPoints = [];
 
-                    // 粒子大小：使用逻辑像素，范围 0.4~1.2，在手机上由于DPR放大，依然精巧
-                    const baseMin = 0.35;
-                    const baseMax = 1.1;
+                    // 粒子大小：根据屏幕尺寸动态调整，让粒子在手机上更精致
+                    // 使用屏幕宽高的平均值作为参考
+                    const avgSize = (W + H) / 2;
+                    // 基础粒子大小：0.5~1.5 逻辑像素，根据屏幕大小微调
+                    const baseMin = Math.max(0.3, 0.5 * (avgSize / 800));
+                    const baseMax = Math.max(0.8, 1.5 * (avgSize / 800));
 
                     // 主轮廓点
                     for (const p of this._points) {
@@ -211,15 +227,14 @@
                 render(ctx, frame) {
                     const points = this.calc(frame % this.generateFrame);
 
-                    // 清空 (透明背景)
+                    // 清空
                     ctx.clearRect(0, 0, CW, CH);
 
-                    // ---- 绘制粒子 (圆形，抗锯齿) ----
+                    // ---- 绘制粒子 (圆形) ----
                     for (const p of points) {
                         const color = Math.random() > 0.6 ? HEART_COLOR_LIGHT : HEART_COLOR;
                         ctx.beginPath();
-                        // 半径 = size * 0.5，至少0.3逻辑像素
-                        const radius = Math.max(0.3, p.size * 0.5);
+                        const radius = Math.max(0.2, p.size * 0.5);
                         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
                         ctx.fillStyle = color;
                         ctx.globalAlpha = 0.85 + Math.random() * 0.15;
@@ -227,23 +242,24 @@
                     }
                     ctx.globalAlpha = 1.0;
 
-                    // ---- 文字装饰 (基于逻辑尺寸) ----
+                    // ---- 文字装饰 ----
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
 
-                    const baseFontSize = Math.min(W, H) / 16;
-                    const fontSize = Math.min(baseFontSize, 40);
+                    // 根据屏幕大小动态调整文字大小
+                    const fontSizeBase = Math.min(W, H) / 14;
+                    const fontSize = Math.min(fontSizeBase, 45);
                     ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", Arial, sans-serif`;
                     ctx.fillStyle = '#FF69B4';
-                    ctx.shadowColor = 'rgba(255,105,180,0.25)';
-                    ctx.shadowBlur = 18;
-                    ctx.fillText('💗 哥哥，喜欢吗 💗', CX, CY - Math.min(W, H) * 0.35);
+                    ctx.shadowColor = 'rgba(255,105,180,0.3)';
+                    ctx.shadowBlur = 20;
+                    ctx.fillText('💗 哥哥，喜欢吗 💗', CX, CY - Math.min(W, H) * 0.38);
 
-                    const subFontSize = Math.min(Math.min(W, H) / 28, 22);
+                    const subFontSize = Math.min(Math.min(W, H) / 26, 24);
                     ctx.font = `italic ${subFontSize}px Arial, sans-serif`;
                     ctx.fillStyle = '#FFB6C1';
-                    ctx.shadowBlur = 10;
-                    ctx.fillText('✨ You are my heartbeat ✨', CX, CY - Math.min(W, H) * 0.27);
+                    ctx.shadowBlur = 12;
+                    ctx.fillText('✨ You are my heartbeat ✨', CX, CY - Math.min(W, H) * 0.29);
 
                     ctx.shadowBlur = 0;
                 }
@@ -293,7 +309,7 @@
                 frameCounter = 0;
             }, { passive: false });
 
-            console.log('✨ 呼吸爱心 · 完美居中版 (DPR=' + DPR + ', 逻辑尺寸=' + W + 'x' + H + ')');
+            console.log('✨ 自适应放大版 (DPR=' + DPR + ', 尺寸=' + W + 'x' + H + ', 缩放=' + HEART_SCALE.toFixed(2) + ')');
         })();
     </script>
 </body>
